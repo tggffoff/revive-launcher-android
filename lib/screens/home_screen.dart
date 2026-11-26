@@ -33,6 +33,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _busy = false;
   bool _loading = true;
   String _language = 'en';
+  String _languagePreference = 'auto';
   String? _nickname;
   String? _error;
 
@@ -125,6 +126,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     if (mounted) {
       setState(() {
+        _languagePreference = savedLanguage;
         _language = resolved;
         _nickname = nickname;
         _loading = false;
@@ -141,9 +143,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('language', value);
     final deviceLanguage = WidgetsBinding.instance.platformDispatcher.locale.languageCode;
-    setState(() => _language = value == 'auto'
+    setState(() { _languagePreference = value; _language = value == 'auto'
         ? (['fr', 'es'].contains(deviceLanguage) ? deviceLanguage : 'en')
-        : value);
+        : value; });
   }
 
   Future<void> _importBuild() async {
@@ -293,7 +295,7 @@ class _HomeScreenState extends State<HomeScreen> {
     const SizedBox(height: 25),
     _section(tr('recent'), tr('all'), () => setState(() => _tab = 1)),
     const SizedBox(height: 11),
-    if (_builds.isEmpty) _empty(compact: true) else SizedBox(height: 125, child: ListView.separated(scrollDirection: Axis.horizontal, itemCount: _builds.length.clamp(0, 8), separatorBuilder: (_, __) => const SizedBox(width: 10), itemBuilder: (_, i) => _recentCard(_builds[i]))),
+    if (_builds.isEmpty) _empty(compact: true) else SizedBox(height: 125, child: ListView.separated(scrollDirection: Axis.horizontal, itemCount: _builds.length.clamp(0, 8).toInt(), separatorBuilder: (_, __) => const SizedBox(width: 10), itemBuilder: (_, i) => _recentCard(_builds[i]))),
     if (_error != null) _errorCard(_error!),
   ]);
 
@@ -347,13 +349,13 @@ class _HomeScreenState extends State<HomeScreen> {
         if (_signedIn) IconButton(onPressed: _editNickname, icon: const Icon(Icons.edit_outlined, color: Color(0xFFBDA0FF))),
       ])),
       const SizedBox(height: 10),
-      if (!_signedIn) SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: _signIn, icon: const Icon(Icons.discord), label: Text(tr('connect')), style: FilledButton.styleFrom(backgroundColor: _purple, padding: const EdgeInsets.symmetric(vertical: 14))))
+      if (!_signedIn) SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: _signIn, icon: const Icon(Icons.login), label: Text(tr('connect')), style: FilledButton.styleFrom(backgroundColor: _purple, padding: const EdgeInsets.symmetric(vertical: 14))))
       else OutlinedButton.icon(onPressed: _signOut, icon: const Icon(Icons.logout), label: Text(tr('disconnect'))),
       const SizedBox(height: 20),
       Text(tr('language'), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
       const SizedBox(height: 8),
       Container(padding: const EdgeInsets.symmetric(horizontal: 13), decoration: BoxDecoration(color: _panel, borderRadius: BorderRadius.circular(13), border: Border.all(color: Colors.white10)), child: DropdownButtonHideUnderline(child: DropdownButton<String>(
-        value: _language,
+        value: _languagePreference,
         isExpanded: true,
         items: [
           DropdownMenuItem(value: 'auto', child: Text(tr('automatic'))),
