@@ -154,7 +154,7 @@ class _LauncherScreenState extends State<LauncherScreen> {
 
   Future<void> _signOut() async => Supabase.instance.client.auth.signOut();
 
-  Future<void> _language(String value) async {
+  Future<void> _setLanguage(String value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('revive_language', value);
     if (mounted) setState(() => _language = value);
@@ -267,7 +267,7 @@ class _LauncherScreenState extends State<LauncherScreen> {
     Container(padding: const EdgeInsets.symmetric(horizontal: 13), decoration: BoxDecoration(color: _panel, borderRadius: BorderRadius.circular(13), border: Border.all(color: Colors.white10)), child: DropdownButtonHideUnderline(child: DropdownButton<String>(
       value: _language, isExpanded: true,
       items: [DropdownMenuItem(value: 'auto', child: Text(t('auto'))), DropdownMenuItem(value: 'fr', child: Text(t('fr'))), DropdownMenuItem(value: 'en', child: Text(t('en'))), DropdownMenuItem(value: 'es', child: Text(t('es')))],
-      onChanged: (value) { if (value != null) _language(value); },
+      onChanged: (value) { if (value != null) _setLanguage(value); },
     ))),
     const SizedBox(height: 18), const Text('REVIVE LAUNCHER ANDROID • 1.0.0', style: TextStyle(color: _muted, fontSize: 10, letterSpacing: 1.2)),
     const SizedBox(height: 5), const Text('Le bouton LANCER est un emplacement d’interface : Android ne peut pas exécuter automatiquement un build Fortnite arbitraire importé comme ZIP.', style: TextStyle(color: _muted, fontSize: 11, height: 1.5)),
