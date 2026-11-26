@@ -301,7 +301,11 @@ class _LauncherScreenState extends State<LauncherScreen> {
       const SizedBox(height: 12), Text(b.description, style: const TextStyle(color: _muted, fontSize: 12, height: 1.4)),
       if (b.hasEngine || b.hasFortniteGame) ...[const SizedBox(height: 8), Text('Structure : ${b.hasEngine ? 'Engine ' : ''}${b.hasFortniteGame ? 'FortniteGame' : ''}', style: const TextStyle(color: Colors.greenAccent, fontSize: 10))],
       const SizedBox(height: 15),
-      if (b.trailerUrl.isNotEmpty) SizedBox(width: double.infinity, child: OutlinedButton.icon(onPressed: () => _openUrl(b.trailerUrl), icon: const Icon(Icons.ondemand_video), label: const Text('YOUTUBE TRAILER'))),
+      SizedBox(width: double.infinity, child: OutlinedButton.icon(
+        onPressed: () => _openUrl(b.trailerUrl.isNotEmpty ? b.trailerUrl : 'https://www.youtube.com/results?search_query=Fortnite+${Uri.encodeComponent(b.version)}+trailer'),
+        icon: const Icon(Icons.ondemand_video),
+        label: Text(b.trailerUrl.isNotEmpty ? 'YOUTUBE TRAILER' : t('trailerSearch')),
+      )),
       SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: () { Navigator.pop(ctx); _toast(t('playInfo')); }, icon: const Icon(Icons.play_arrow), label: Text(t('play')), style: FilledButton.styleFrom(backgroundColor: _purple, padding: const EdgeInsets.symmetric(vertical: 14)))),
       Row(mainAxisAlignment: MainAxisAlignment.end, children: [TextButton.icon(onPressed: () { Navigator.pop(ctx); _editBuild(b); }, icon: const Icon(Icons.edit_outlined), label: Text(t('edit'))), TextButton.icon(onPressed: () => _delete(b), icon: const Icon(Icons.delete_outline), label: Text(t('delete')))]),
     ])),
