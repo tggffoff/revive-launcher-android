@@ -1,27 +1,37 @@
-# Revive Launcher — Android prototype
+# Revive Launcher — Android
 
-This is an Android-oriented Flutter prototype using the supplied Revive logo and a dark desktop-launcher-inspired visual direction (ATLAS-style layout conventions, adapted for mobile).
+Projet Flutter Android autonome. Il ne réutilise pas le code du launcher Windows.
 
-## Included in this iteration
+## Fonctions de cette version
 
-- Revive branding and supplied logo.
-- Home, Builds, Archives and Settings navigation.
-- Dark hero panel, library cards, build details sheet and profile placeholder.
-- ZIP picker and extraction into app-private storage.
-- Basic archive inspection for `Engine/` and `FortniteGame/` folders, plus a best-effort version guess from the archive name/path.
-- Season artwork lookup using the existing `assets/seasons/SeasonN.jpg` images in the source repository (loaded from the public repository URL for this prototype).
-- GitHub Actions workflow to build an Android APK.
+- Interface mobile Revive sombre violet/bleu, adaptée aux écrans Android.
+- Connexion Discord obligatoire via Supabase OAuth, ouverture du navigateur puis retour par le deep link `revive://auth/callback`.
+- Profil Discord : avatar fourni par Discord (non modifiable dans l'application), pseudo d'affichage modifiable.
+- Accueil, bibliothèque, archives et paramètres.
+- Import de builds **ZIP uniquement** (pas d'APK/OBB), extraction dans l'espace privé de l'application, contrôle des chemins ZIP, détection indicative de version et détection des dossiers Engine/FortniteGame.
+- Fiche de build modifiable : nom, version, description et lien YouTube.
+- Bibliothèque et préférences sauvegardées localement.
+- Langues français, anglais et espagnol ; choix automatique de la langue du téléphone, anglais par défaut.
+- Accès au catalogue FortForge : https://fortforge.co.uk
+- Bouton LANCER visible mais volontairement provisoire : le runtime nécessaire pour exécuter d'anciens builds Fortnite n'est pas fourni par Android ni par un ZIP de données.
 
-## Not implemented yet
+## Configuration Discord requise
 
-- Offline bundling of the season artwork (the prototype currently loads it from the public source repository).
-- Persistent build database and large-archive streaming extraction.
-- Discord/Supabase mobile OAuth callback integration.
-- Android-compatible Fortnite runtime/launch mechanism.
-- Actual build launch action (the current JOUER button is explicitly a placeholder).
+1. Créer/configurer un projet Supabase.
+2. Dans Supabase Authentication > Providers, activer Discord et renseigner les identifiants OAuth de l'application Discord.
+3. Ajouter `revive://auth/callback` aux URL de redirection autorisées de Supabase.
+4. Dans les paramètres du dépôt GitHub, ajouter les Actions secrets :
+   - `SUPABASE_URL`
+   - `SUPABASE_ANON_KEY`
 
-The ZIP is treated as a game build archive, not as an APK/OBB installer. This prototype extracts its contents and inspects the folder structure. The current picker reads the ZIP into memory, so it is only suitable for small test archives; production support for very large Fortnite archives must use streaming extraction and progress/cancellation before it is used with multi-gigabyte files.
+Sans ces secrets, l'APK peut être compilé, mais la connexion Discord reste désactivée dans l'application. Ne jamais mettre le secret OAuth Discord privé dans le code ou dans GitHub Actions.
 
-## Build
+## Import ZIP : limites actuelles
 
-Push this directory to a GitHub repository. The workflow in `.github/workflows/android.yml` uses GitHub Actions to build and upload the release APK. No APK has been compiled in this workspace.
+L'import utilise une lecture en mémoire. Pour éviter de faire planter le téléphone, les ZIP de plus de 400 Mo et les archives dont le contenu extrait dépasse 2 Go sont refusés. Les archives multi-gigaoctets nécessitent une extraction en flux avec progression et annulation ; cette fonction n'est pas incluse dans cette version.
+
+La version reconnue est une estimation à partir du nom du ZIP et de ses chemins internes. Vérifie-la dans la fiche du build. Les miniatures et bandes-annonces ne sont pas récupérées automatiquement depuis un catalogue distant : la fiche permet de renseigner un lien YouTube manuellement.
+
+## Compilation
+
+Le workflow GitHub Actions génère l'APK release, lance l'analyse Dart et les tests widget, puis publie l'APK en artefact de workflow.
