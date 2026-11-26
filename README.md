@@ -1,27 +1,35 @@
-# Revive Launcher — Android prototype
+# Revive Launcher — Android
 
-This is an Android-oriented Flutter prototype using the supplied Revive logo and a dark desktop-launcher-inspired visual direction (ATLAS-style layout conventions, adapted for mobile).
+Application Flutter Android indépendante du launcher Windows.
 
-## Included in this iteration
+## Fonctionnalités
 
-- Revive branding and supplied logo.
-- Home, Builds, Archives and Settings navigation.
-- Dark hero panel, library cards, build details sheet and profile placeholder.
-- ZIP picker and extraction into app-private storage.
-- Basic archive inspection for `Engine/` and `FortniteGame/` folders, plus a best-effort version guess from the archive name/path.
-- Season artwork lookup using the existing `assets/seasons/SeasonN.jpg` images in the source repository (loaded from the public repository URL for this prototype).
-- GitHub Actions workflow to build an Android APK.
+- Interface mobile sombre Revive : Accueil, Bibliothèque, Archives et Paramètres.
+- Import de builds Fortnite Android au format ZIP uniquement.
+- Détection indicative de la version à partir du nom de l'archive et des chemins contenus dans le ZIP.
+- Extraction dans l'espace privé de l'application, vérification de chemins ZIP et persistance de la bibliothèque.
+- Connexion Discord via Supabase OAuth (PKCE), retour par le lien profond `revive://auth/callback`.
+- Avatar Discord, pseudo d'affichage modifiable localement et choix FR / EN / ES avec détection automatique de la langue du téléphone.
+- Accès au catalogue Android de FortForge : https://fortforge.co.uk/builds/android
+- Bouton JOUER présent comme emplacement d'interface, mais le moteur de lancement Android n'est pas implémenté.
 
-## Not implemented yet
+## Configuration Discord
 
-- Offline bundling of the season artwork (the prototype currently loads it from the public source repository).
-- Persistent build database and large-archive streaming extraction.
-- Discord/Supabase mobile OAuth callback integration.
-- Android-compatible Fortnite runtime/launch mechanism.
-- Actual build launch action (the current JOUER button is explicitly a placeholder).
+Créer un projet Supabase et activer le fournisseur Discord dans Authentication > Providers. Configurer l'URL de redirection autorisée `revive://auth/callback` dans les URL de redirection Supabase et configurer les identifiants OAuth Discord côté Supabase.
 
-The ZIP is treated as a game build archive, not as an APK/OBB installer. This prototype extracts its contents and inspects the folder structure. The current picker reads the ZIP into memory, so it is only suitable for small test archives; production support for very large Fortnite archives must use streaming extraction and progress/cancellation before it is used with multi-gigabyte files.
+Ajouter les secrets GitHub Actions suivants :
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
 
-## Build
+Le client n'intègre aucun secret privé Discord. Seule la clé anon publique Supabase est passée au build.
 
-Push this directory to a GitHub repository. The workflow in `.github/workflows/android.yml` uses GitHub Actions to build and upload the release APK. No APK has been compiled in this workspace.
+## Limites connues
+
+- L'import ZIP actuel lit le contenu de l'archive en mémoire. Il convient aux archives de test de taille raisonnable ; l'extraction en flux avec progression/annulation est nécessaire avant de traiter des archives Fortnite de plusieurs Go.
+- La version détectée est une estimation basée sur les noms de fichiers et chemins ZIP ; elle doit être vérifiée dans la fiche du build.
+- Le catalogue FortForge est ouvert dans le navigateur ; aucune API non documentée n'est supposée.
+- Le bouton JOUER ne démarre pas Fortnite. Android ne fournit pas de moteur générique permettant de lancer directement un ancien build PC/Android.
+
+## Compilation
+
+Le workflow GitHub Actions génère un APK release et le publie comme artefact de workflow. Les secrets Supabase sont facultatifs pour compiler, mais nécessaires pour activer la connexion Discord.

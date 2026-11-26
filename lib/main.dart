@@ -1,13 +1,25 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/home_screen.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const ReviveLauncherApp());
+
+  const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
+  const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+  final configured = supabaseUrl.startsWith('https://') && supabaseAnonKey.isNotEmpty;
+
+  if (configured) {
+    await Supabase.initialize(url: supabaseUrl, anonKey: supabaseAnonKey);
+  }
+
+  runApp(ReviveLauncherApp(supabaseConfigured: configured));
 }
 
 class ReviveLauncherApp extends StatelessWidget {
-  const ReviveLauncherApp({super.key});
+  const ReviveLauncherApp({super.key, required this.supabaseConfigured});
+
+  final bool supabaseConfigured;
 
   @override
   Widget build(BuildContext context) {
@@ -17,16 +29,16 @@ class ReviveLauncherApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF070610),
+        scaffoldBackgroundColor: const Color(0xFF080A12),
         colorScheme: ColorScheme.fromSeed(
           seedColor: violet,
           brightness: Brightness.dark,
-          surface: const Color(0xFF121020),
+          surface: const Color(0xFF141827),
         ),
         useMaterial3: true,
         fontFamily: 'Roboto',
       ),
-      home: const HomeScreen(),
+      home: HomeScreen(supabaseConfigured: supabaseConfigured),
     );
   }
 }

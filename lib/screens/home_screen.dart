@@ -1,62 +1,256 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../services/auth_service.dart';
 import '../services/build_archive_service.dart';
 
-const bg = Color(0xFF080A12);
-const panel = Color(0xFF141827);
-const muted = Color(0xFF929AAF);
-const purple = Color(0xFF9A4DFF);
+const _bg = Color(0xFF080A12);
+const _panel = Color(0xFF141827);
+const _muted = Color(0xFF929AAF);
+const _purple = Color(0xFF9A4DFF);
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({super.key, required this.supabaseConfigured});
+  final bool supabaseConfigured;
+
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final importer = BuildArchiveService();
-  final search = TextEditingController();
-  final builds = <ImportedBuild>[];
-  int tab = 0;
-  bool busy = false;
-  String? error;
+  final _archive = BuildArchiveService();
+  final _search = TextEditingController();
+  final _auth = ReviveAuthService();
+  final _builds = <ImportedBuild>[];
+  StreamSubscription<AuthState>? _authSubscription;
 
-  Future<void> importBuild() async {
-    setState(() { busy = true; error = null; });
-    try {
-      final build = await importer.pickAndImportZip();
-      if (!mounted || build == null) return;
-      setState(() { builds.insert(0, build); tab = 1; });
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Build importé dans la bibliothèque')));
-    } catch (e) {
-      if (mounted) setState(() => error = e.toString().replaceFirst('Exception: ', ''));
-    } finally {
-      if (mounted) setState(() => busy = false);
+  int _tab = 0;
+  bool _busy = false;
+  bool _loading = true;
+  String _language = 'en';
+  String? _nickname;
+  String? _error;
+
+  static const _translations = <String, Map<String, String>>{
+    'fr': {
+      'home': 'Accueil', 'library': 'Bibliothèque', 'archives': 'Archives', 'settings': 'Paramètres',
+      'welcome': 'Prêt à rejouer ?', 'tagline': 'TES ANCIENNES SAISONS. TON HISTOIRE.',
+      'hero': 'Tous tes builds Android organisés au même endroit.',
+      'import': 'IMPORTER UN BUILD ZIP', 'recent': 'BUILDS RÉCENTS', 'all': 'VOIR TOUT',
+      'empty': 'Aucun build importé', 'emptyHint': 'Tes archives apparaîtront ici.',
+      'search': 'Rechercher un build…', 'myBuilds': 'Mes builds', 'profile': 'Profil Discord',
+      'connect': 'SE CONNECTER AVEC DISCORD', 'disconnect': 'Se déconnecter',
+      'language': 'Langue', 'automatic': 'Automatique (langue du téléphone)',
+      'french': 'Français', 'english': 'English', 'spanish': 'Español',
+      'accountHint': 'Connecte ton compte Discord pour retrouver ton profil.',
+      'archivesHint': 'Parcours les builds Android disponibles sur FortForge, puis importe le ZIP téléchargé.',
+      'openFortForge': 'OUVRIR FORTFORGE', 'play': 'JOUER', 'playHint': 'Le lancement Android n’est pas encore activé.',
+      'version': 'Version', 'files': 'fichiers', 'delete': 'Supprimer', 'cancel': 'Annuler',
+      'name': 'Pseudo affiché', 'save': 'Enregistrer', 'loginRequired': 'Configure Supabase pour activer la connexion Discord.',
+      'imported': 'Build importé dans la bibliothèque', 'badZip': 'Impossible d’importer ce fichier ZIP.',
+      'logout': 'Déconnexion effectuée', 'engine': 'Dossier Engine détecté', 'game': 'Dossier FortniteGame détecté',
+    },
+    'en': {
+      'home': 'Home', 'library': 'Library', 'archives': 'Archives', 'settings': 'Settings',
+      'welcome': 'Ready to play again?', 'tagline': 'YOUR OLD SEASONS. YOUR STORY.',
+      'hero': 'All your Android builds, organized in one place.',
+      'import': 'IMPORT BUILD ZIP', 'recent': 'RECENT BUILDS', 'all': 'VIEW ALL',
+      'empty': 'No imported builds', 'emptyHint': 'Your archives will appear here.',
+      'search': 'Search builds…', 'myBuilds': 'My builds', 'profile': 'Discord profile',
+      'connect': 'SIGN IN WITH DISCORD', 'disconnect': 'Sign out',
+      'language': 'Language', 'automatic': 'Automatic (device language)',
+      'french': 'Français', 'english': 'English', 'spanish': 'Español',
+      'accountHint': 'Connect your Discord account to show your profile.',
+      'archivesHint': 'Browse Android builds on FortForge, then import the ZIP you downloaded.',
+      'openFortForge': 'OPEN FORTFORGE', 'play': 'PLAY', 'playHint': 'Android build launching is not enabled yet.',
+      'version': 'Version', 'files': 'files', 'delete': 'Delete', 'cancel': 'Cancel',
+      'name': 'Display nickname', 'save': 'Save', 'loginRequired': 'Configure Supabase to enable Discord sign-in.',
+      'imported': 'Build imported into your library', 'badZip': 'Could not import this ZIP file.',
+      'logout': 'Signed out', 'engine': 'Engine folder detected', 'game': 'FortniteGame folder detected',
+    },
+    'es': {
+      'home': 'Inicio', 'library': 'Biblioteca', 'archives': 'Archivos', 'settings': 'Ajustes',
+      'welcome': '¿Listo para volver?', 'tagline': 'TUS TEMPORADAS ANTIGUAS. TU HISTORIA.',
+      'hero': 'Todos tus builds Android organizados en un solo lugar.',
+      'import': 'IMPORTAR BUILD ZIP', 'recent': 'BUILDS RECIENTES', 'all': 'VER TODO',
+      'empty': 'No hay builds importados', 'emptyHint': 'Tus archivos aparecerán aquí.',
+      'search': 'Buscar un build…', 'myBuilds': 'Mis builds', 'profile': 'Perfil de Discord',
+      'connect': 'INICIAR SESIÓN CON DISCORD', 'disconnect': 'Cerrar sesión',
+      'language': 'Idioma', 'automatic': 'Automático (idioma del dispositivo)',
+      'french': 'Français', 'english': 'English', 'spanish': 'Español',
+      'accountHint': 'Conecta tu cuenta de Discord para mostrar tu perfil.',
+      'archivesHint': 'Explora los builds Android en FortForge e importa el ZIP descargado.',
+      'openFortForge': 'ABRIR FORTFORGE', 'play': 'JUGAR', 'playHint': 'El inicio de builds Android aún no está activado.',
+      'version': 'Versión', 'files': 'archivos', 'delete': 'Eliminar', 'cancel': 'Cancelar',
+      'name': 'Apodo visible', 'save': 'Guardar', 'loginRequired': 'Configura Supabase para activar Discord.',
+      'imported': 'Build importado a la biblioteca', 'badZip': 'No se pudo importar este archivo ZIP.',
+      'logout': 'Sesión cerrada', 'engine': 'Carpeta Engine detectada', 'game': 'Carpeta FortniteGame detectada',
+    },
+  };
+
+  String tr(String key) => _translations[_language]?[key] ?? _translations['en']![key]!;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLocalState();
+    if (widget.supabaseConfigured) {
+      _authSubscription = _auth.onAuthStateChange.listen((_) {
+        if (mounted) setState(() {});
+      });
     }
   }
 
+  Future<void> _loadLocalState() async {
+    final prefs = await SharedPreferences.getInstance();
+    final deviceLanguage = WidgetsBinding.instance.platformDispatcher.locale.languageCode;
+    final savedLanguage = prefs.getString('language') ?? 'auto';
+    final resolved = savedLanguage == 'auto'
+        ? (['fr', 'es'].contains(deviceLanguage) ? deviceLanguage : 'en')
+        : savedLanguage;
+    final nickname = prefs.getString('profile_nickname');
+    final stored = prefs.getString('imported_builds');
+    if (stored != null) {
+      try {
+        final values = (jsonDecode(stored) as List).cast<Map<String, dynamic>>();
+        _builds.addAll(values.map(ImportedBuild.fromJson));
+      } catch (_) {
+        await prefs.remove('imported_builds');
+      }
+    }
+    if (mounted) {
+      setState(() {
+        _language = resolved;
+        _nickname = nickname;
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _saveBuilds() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('imported_builds', jsonEncode(_builds.map((b) => b.toJson()).toList()));
+  }
+
+  Future<void> _setLanguage(String value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('language', value);
+    final deviceLanguage = WidgetsBinding.instance.platformDispatcher.locale.languageCode;
+    setState(() => _language = value == 'auto'
+        ? (['fr', 'es'].contains(deviceLanguage) ? deviceLanguage : 'en')
+        : value);
+  }
+
+  Future<void> _importBuild() async {
+    setState(() { _busy = true; _error = null; });
+    try {
+      final build = await _archive.pickAndImportZip();
+      if (!mounted || build == null) return;
+      setState(() { _builds.insert(0, build); _tab = 1; });
+      await _saveBuilds();
+      if (mounted) _message(tr('imported'));
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _signIn() async {
+    if (!widget.supabaseConfigured) {
+      _message(tr('loginRequired'));
+      return;
+    }
+    try {
+      await _auth.signInWithDiscord();
+    } catch (error) {
+      _message(error.toString());
+    }
+  }
+
+  Future<void> _signOut() async {
+    try {
+      await _auth.signOut();
+      if (mounted) _message(tr('logout'));
+    } catch (error) {
+      _message(error.toString());
+    }
+  }
+
+  Future<void> _editNickname() async {
+    final controller = TextEditingController(text: _nickname ?? _discordName);
+    final value = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(tr('name')),
+        content: TextField(controller: controller, maxLength: 32, autofocus: true),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(context, controller.text.trim()), child: Text(tr('save'))),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (value == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('profile_nickname', value);
+    if (mounted) setState(() => _nickname = value.isEmpty ? null : value);
+  }
+
+  String get _discordName {
+    if (!widget.supabaseConfigured) return 'Revive user';
+    final metadata = _auth.currentUser?.userMetadata ?? {};
+    return (metadata['global_name'] ?? metadata['full_name'] ?? metadata['name'] ?? 'Discord user').toString();
+  }
+
+  String? get _avatarUrl {
+    if (!widget.supabaseConfigured) return null;
+    final metadata = _auth.currentUser?.userMetadata ?? {};
+    final value = metadata['avatar_url'] ?? metadata['picture'];
+    return value is String && value.startsWith('https://') ? value : null;
+  }
+
+  bool get _signedIn => widget.supabaseConfigured && _auth.currentUser != null;
+
+  void _message(String value) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(value)));
+  }
+
   @override
-  void dispose() { search.dispose(); super.dispose(); }
+  void dispose() {
+    _authSubscription?.cancel();
+    _search.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final pages = [home(), library(), archives(), settings()];
+    final pages = [_home(), _library(), _archives(), _settings()];
     return Scaffold(
-      backgroundColor: bg,
-      body: SafeArea(child: Column(children: [header(), Expanded(child: pages[tab])])),
+      backgroundColor: _bg,
+      body: SafeArea(child: Column(children: [_header(), Expanded(child: _loading ? const Center(child: CircularProgressIndicator()) : pages[_tab])])),
       bottomNavigationBar: NavigationBar(
-        height: 67, backgroundColor: const Color(0xFF0D101A), indicatorColor: purple.withValues(alpha: .22),
-        selectedIndex: tab, onDestinationSelected: (v) => setState(() => tab = v),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.dashboard_outlined), label: 'Accueil'),
-          NavigationDestination(icon: Icon(Icons.grid_view_rounded), label: 'Builds'),
-          NavigationDestination(icon: Icon(Icons.archive_outlined), label: 'Archives'),
-          NavigationDestination(icon: Icon(Icons.settings_outlined), label: 'Réglages'),
+        height: 68,
+        backgroundColor: const Color(0xFF0D101A),
+        indicatorColor: _purple.withValues(alpha: .22),
+        selectedIndex: _tab,
+        onDestinationSelected: (value) => setState(() => _tab = value),
+        destinations: [
+          NavigationDestination(icon: const Icon(Icons.dashboard_outlined), label: tr('home')),
+          NavigationDestination(icon: const Icon(Icons.grid_view_rounded), label: tr('library')),
+          NavigationDestination(icon: const Icon(Icons.archive_outlined), label: tr('archives')),
+          NavigationDestination(icon: const Icon(Icons.settings_outlined), label: tr('settings')),
         ],
       ),
     );
   }
 
-  Widget header() => Padding(
+  Widget _header() => Padding(
     padding: const EdgeInsets.fromLTRB(18, 12, 18, 15),
     child: Row(children: [
       ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.asset('assets/images/revive_logo.png', width: 42, height: 42, fit: BoxFit.cover)),
@@ -66,104 +260,181 @@ class _HomeScreenState extends State<HomeScreen> {
         Text('LAUNCHER', style: TextStyle(fontSize: 9, color: Color(0xFFBCA0F1), letterSpacing: 3, fontWeight: FontWeight.w800)),
       ]),
       const Spacer(),
-      IconButton(onPressed: () => setState(() => tab = 3), icon: const CircleAvatar(radius: 17, backgroundColor: Color(0xFF33204F), child: Icon(Icons.person, size: 18, color: Color(0xFFE0CBFF))), tooltip: 'Profil'),
+      IconButton(onPressed: () => setState(() => _tab = 3), icon: _avatar(size: 34), tooltip: tr('profile')),
     ]),
   );
 
-  Widget home() => ListView(padding: const EdgeInsets.fromLTRB(18, 3, 18, 25), children: [
-    const Text('TON ESPACE', style: TextStyle(color: Color(0xFFBDA0FF), fontSize: 10, letterSpacing: 2, fontWeight: FontWeight.w900)),
+  Widget _avatar({double size = 48}) => CircleAvatar(
+    radius: size / 2,
+    backgroundColor: const Color(0xFF39215B),
+    backgroundImage: _avatarUrl == null ? null : NetworkImage(_avatarUrl!),
+    child: _avatarUrl == null ? Icon(Icons.person, color: const Color(0xFFE0CBFF), size: size * .55) : null,
+  );
+
+  Widget _home() => ListView(padding: const EdgeInsets.fromLTRB(18, 3, 18, 25), children: [
+    const Text('REVIVE / ANDROID', style: TextStyle(color: Color(0xFFBDA0FF), fontSize: 10, letterSpacing: 2, fontWeight: FontWeight.w900)),
     const SizedBox(height: 5),
-    const Text('Prêt à rejouer ?', style: TextStyle(fontSize: 27, fontWeight: FontWeight.w900)),
+    Text(tr('welcome'), style: const TextStyle(fontSize: 27, fontWeight: FontWeight.w900)),
     const SizedBox(height: 17),
     Container(height: 235, padding: const EdgeInsets.all(20), decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(23), border: Border.all(color: purple.withValues(alpha: .55)),
+      borderRadius: BorderRadius.circular(23), border: Border.all(color: _purple.withValues(alpha: .55)),
       gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF35145E), Color(0xFF1A1D3C), Color(0xFF102B45)]),
-      boxShadow: [BoxShadow(color: purple.withValues(alpha: .13), blurRadius: 28, offset: const Offset(0, 10))],
+      boxShadow: [BoxShadow(color: _purple.withValues(alpha: .13), blurRadius: 28, offset: const Offset(0, 10))],
     ), child: Stack(children: [
       Positioned(right: -16, top: -25, child: Icon(Icons.sync_rounded, size: 205, color: Colors.white.withValues(alpha: .055))),
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('REVIVE  /  BUILD LIBRARY', style: TextStyle(fontSize: 9, letterSpacing: 1.4, color: Color(0xFFDCCAFF), fontWeight: FontWeight.w900)),
+        Text(tr('tagline'), style: const TextStyle(fontSize: 21, height: 1.1, fontWeight: FontWeight.w900)),
         const Spacer(),
-        const Text('TES ANCIENNES\nSAISONS. TON HISTOIRE.', style: TextStyle(fontSize: 23, height: 1.1, fontWeight: FontWeight.w900)),
-        const SizedBox(height: 8),
-        const Text('Tous tes builds organisés au même endroit.', style: TextStyle(fontSize: 11, color: Colors.white70)),
+        Text(tr('hero'), style: const TextStyle(fontSize: 11, color: Colors.white70)),
         const SizedBox(height: 15),
-        FilledButton.icon(onPressed: busy ? null : importBuild, icon: busy ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.add, size: 18), label: Text(busy ? 'IMPORTATION…' : 'IMPORTER UN BUILD'), style: FilledButton.styleFrom(backgroundColor: purple, foregroundColor: Colors.white, textStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: .5))),
+        FilledButton.icon(onPressed: _busy ? null : _importBuild, icon: _busy ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.add, size: 18), label: Text(tr('import')), style: FilledButton.styleFrom(backgroundColor: _purple, foregroundColor: Colors.white, textStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: .5))),
       ]),
     ])),
     const SizedBox(height: 25),
-    section('BUILDS RÉCENTS', 'VOIR TOUT', () => setState(() => tab = 1)),
+    _section(tr('recent'), tr('all'), () => setState(() => _tab = 1)),
     const SizedBox(height: 11),
-    if (builds.isEmpty) emptyState(compact: true) else SizedBox(height: 125, child: ListView.separated(scrollDirection: Axis.horizontal, itemCount: builds.length, separatorBuilder: (_, __) => const SizedBox(width: 10), itemBuilder: (_, i) => recentCard(builds[i]))),
-    const SizedBox(height: 24),
-    section('ACCÈS RAPIDE'),
-    const SizedBox(height: 10),
-    Row(children: [Expanded(child: actionTile(Icons.file_upload_outlined, 'Importer un ZIP', 'Ajouter un build', importBuild)), const SizedBox(width: 10), Expanded(child: actionTile(Icons.archive_outlined, 'Archives', 'Trouver une version', () => setState(() => tab = 2)))]),
-    if (error != null) errorCard(error!),
+    if (_builds.isEmpty) _empty(compact: true) else SizedBox(height: 125, child: ListView.separated(scrollDirection: Axis.horizontal, itemCount: _builds.length.clamp(0, 8), separatorBuilder: (_, __) => const SizedBox(width: 10), itemBuilder: (_, i) => _recentCard(_builds[i]))),
+    if (_error != null) _errorCard(_error!),
   ]);
 
-  Widget library() {
-    final q = search.text.toLowerCase().trim();
-    final list = builds.where((b) => '${b.name} ${b.version}'.toLowerCase().contains(q)).toList();
+  Widget _library() {
+    final query = _search.text.toLowerCase().trim();
+    final list = _builds.where((b) => '${b.name} ${b.version}'.toLowerCase().contains(query)).toList();
     return ListView(padding: const EdgeInsets.fromLTRB(18, 3, 18, 25), children: [
-      const Text('BIBLIOTHÈQUE', style: TextStyle(color: Color(0xFFBDA0FF), fontSize: 10, letterSpacing: 2, fontWeight: FontWeight.w900)),
-      const SizedBox(height: 5), const Text('Mes builds', style: TextStyle(fontSize: 27, fontWeight: FontWeight.w900)),
+      const Text('REVIVE / LIBRARY', style: TextStyle(color: Color(0xFFBDA0FF), fontSize: 10, letterSpacing: 2, fontWeight: FontWeight.w900)),
+      const SizedBox(height: 5), Text(tr('myBuilds'), style: const TextStyle(fontSize: 27, fontWeight: FontWeight.w900)),
       const SizedBox(height: 15),
-      TextField(controller: search, onChanged: (_) => setState(() {}), style: const TextStyle(fontSize: 12), decoration: InputDecoration(prefixIcon: const Icon(Icons.search, color: muted), hintText: 'Rechercher un build…', filled: true, fillColor: panel, border: OutlineInputBorder(borderRadius: BorderRadius.circular(13), borderSide: BorderSide.none), contentPadding: const EdgeInsets.symmetric(vertical: 12))),
-      const SizedBox(height: 15),
-      Row(children: [Text('${list.length} BUILD${list.length == 1 ? '' : 'S'}', style: const TextStyle(color: muted, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1.4)), const Spacer(), TextButton.icon(onPressed: importBuild, icon: const Icon(Icons.add, size: 16), label: const Text('IMPORTER'))]),
-      if (list.isEmpty) emptyState() else ...list.map(buildCard),
-      if (error != null) errorCard(error!),
+      TextField(controller: _search, onChanged: (_) => setState(() {}), style: const TextStyle(fontSize: 12), decoration: InputDecoration(prefixIcon: const Icon(Icons.search, color: _muted), hintText: tr('search'), filled: true, fillColor: _panel, border: OutlineInputBorder(borderRadius: BorderRadius.circular(13), borderSide: BorderSide.none))),
+      const SizedBox(height: 12),
+      Row(children: [Text('${list.length} BUILDS', style: const TextStyle(color: _muted, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1.4)), const Spacer(), TextButton.icon(onPressed: _importBuild, icon: const Icon(Icons.add, size: 16), label: Text(tr('import')))]),
+      if (list.isEmpty) _empty() else ...list.map(_buildCard),
+      if (_error != null) _errorCard(_error!),
     ]);
   }
 
-  Widget buildCard(ImportedBuild b) => Padding(padding: const EdgeInsets.only(bottom: 11), child: InkWell(onTap: () => showBuild(b), borderRadius: BorderRadius.circular(17), child: Container(padding: const EdgeInsets.all(11), decoration: BoxDecoration(color: panel, borderRadius: BorderRadius.circular(17), border: Border.all(color: Colors.white10)), child: Row(children: [artwork(b.version, 91, 88), const SizedBox(width: 12), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(b.version, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900)), const SizedBox(height: 5), Text(b.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: muted, fontSize: 10)), const SizedBox(height: 8), Text('${b.sizeLabel}  •  ${b.fileCount} fichiers', style: const TextStyle(color: Color(0xFFBCA0F1), fontSize: 10, fontWeight: FontWeight.w700))])), const Icon(Icons.chevron_right, color: muted)]))));
+  Widget _archives() => ListView(padding: const EdgeInsets.fromLTRB(18, 3, 18, 25), children: [
+    const Text('REVIVE / ARCHIVES', style: TextStyle(color: Color(0xFFBDA0FF), fontSize: 10, letterSpacing: 2, fontWeight: FontWeight.w900)),
+    const SizedBox(height: 5), Text(tr('archives'), style: const TextStyle(fontSize: 27, fontWeight: FontWeight.w900)),
+    const SizedBox(height: 9), Text(tr('archivesHint'), style: const TextStyle(color: _muted, fontSize: 12, height: 1.5)),
+    const SizedBox(height: 18),
+    Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: _panel, borderRadius: BorderRadius.circular(17), border: Border.all(color: Colors.white10)), child: Row(children: [
+      Container(width: 48, height: 48, decoration: BoxDecoration(color: _purple.withValues(alpha: .18), borderRadius: BorderRadius.circular(13)), child: const Icon(Icons.cloud_download_outlined, color: Color(0xFFD1B3FF), size: 26)),
+      const SizedBox(width: 12),
+      const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('FortForge', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+        SizedBox(height: 4), Text('Catalogue des builds Fortnite Android', style: TextStyle(color: _muted, fontSize: 10)),
+        SizedBox(height: 4), Text('fortforge.co.uk/builds/android', style: TextStyle(color: Color(0xFFBDA0FF), fontSize: 10)),
+      ])),
+    ])),
+    const SizedBox(height: 12),
+    SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: () => launchUrl(Uri.parse('https://fortforge.co.uk/builds/android'), mode: LaunchMode.externalApplication), icon: const Icon(Icons.open_in_new), label: Text(tr('openFortForge')), style: FilledButton.styleFrom(backgroundColor: _purple, padding: const EdgeInsets.symmetric(vertical: 14)))),
+    const SizedBox(height: 10),
+    OutlinedButton.icon(onPressed: _importBuild, icon: const Icon(Icons.file_upload_outlined), label: Text(tr('import'))),
+  ]);
 
-  Widget recentCard(ImportedBuild b) => InkWell(onTap: () => showBuild(b), child: Container(width: 220, padding: const EdgeInsets.all(9), decoration: BoxDecoration(color: panel, borderRadius: BorderRadius.circular(15), border: Border.all(color: Colors.white10)), child: Row(children: [artwork(b.version, 77, 105), const SizedBox(width: 10), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [Text(b.version, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900)), const SizedBox(height: 5), Text(b.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: muted))]))])));
-
-  Widget artwork(String version, double w, double h) {
-    final match = RegExp(r'^(\d+)\.').firstMatch(version);
-    final season = match == null ? null : int.tryParse(match.group(1)!);
-    final imageUrl = season != null && season >= 1 && season <= 41
-        ? 'https://raw.githubusercontent.com/tggffoff/revive-launcher/main/atlas_link_flutter/assets/seasons/Season$season.jpg'
-        : null;
-    return Container(
-      width: w, height: h,
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF6126A8), Color(0xFF183B70), Color(0xFF101827)])),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(fit: StackFit.expand, children: [
-        if (imageUrl != null) Image.network(imageUrl, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox.shrink()),
-        DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black.withValues(alpha: .02), Colors.black.withValues(alpha: .76)]))),
-        Positioned(left: 8, right: 5, bottom: 8, child: Text(version, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: w < 90 ? 11 : 14, fontWeight: FontWeight.w900, shadows: const [Shadow(color: Colors.black, blurRadius: 5)]))),
-      ]),
-    );
+  Widget _settings() {
+    final user = _auth.currentUser;
+    return ListView(padding: const EdgeInsets.fromLTRB(18, 3, 18, 25), children: [
+      const Text('REVIVE / SETTINGS', style: TextStyle(color: Color(0xFFBDA0FF), fontSize: 10, letterSpacing: 2, fontWeight: FontWeight.w900)),
+      const SizedBox(height: 5), Text(tr('settings'), style: const TextStyle(fontSize: 27, fontWeight: FontWeight.w900)),
+      const SizedBox(height: 17),
+      Container(padding: const EdgeInsets.all(15), decoration: BoxDecoration(color: _panel, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white10)), child: Row(children: [
+        _avatar(size: 52), const SizedBox(width: 12),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(_nickname ?? _discordName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w900)),
+          const SizedBox(height: 4), Text(user?.email ?? tr('accountHint'), maxLines: 2, style: const TextStyle(color: _muted, fontSize: 10)),
+        ])),
+        if (_signedIn) IconButton(onPressed: _editNickname, icon: const Icon(Icons.edit_outlined, color: Color(0xFFBDA0FF))),
+      ])),
+      const SizedBox(height: 10),
+      if (!_signedIn) SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: _signIn, icon: const Icon(Icons.discord), label: Text(tr('connect')), style: FilledButton.styleFrom(backgroundColor: _purple, padding: const EdgeInsets.symmetric(vertical: 14))))
+      else OutlinedButton.icon(onPressed: _signOut, icon: const Icon(Icons.logout), label: Text(tr('disconnect'))),
+      const SizedBox(height: 20),
+      Text(tr('language'), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
+      const SizedBox(height: 8),
+      Container(padding: const EdgeInsets.symmetric(horizontal: 13), decoration: BoxDecoration(color: _panel, borderRadius: BorderRadius.circular(13), border: Border.all(color: Colors.white10)), child: DropdownButtonHideUnderline(child: DropdownButton<String>(
+        value: _language,
+        isExpanded: true,
+        items: [
+          DropdownMenuItem(value: 'auto', child: Text(tr('automatic'))),
+          DropdownMenuItem(value: 'fr', child: Text(tr('french'))),
+          DropdownMenuItem(value: 'en', child: Text(tr('english'))),
+          DropdownMenuItem(value: 'es', child: Text(tr('spanish'))),
+        ],
+        onChanged: (value) { if (value != null) _setLanguage(value); },
+      ))),
+      const SizedBox(height: 18),
+      const Text('REVIVE LAUNCHER ANDROID', style: TextStyle(color: _muted, fontSize: 10, letterSpacing: 1.5, fontWeight: FontWeight.w900)),
+      const SizedBox(height: 5),
+      const Text('Discord OAuth via Supabase. Les builds ZIP sont stockés dans l’espace privé de l’application. Le bouton JOUER reste un emplacement en attendant un moteur Android compatible.', style: TextStyle(color: _muted, fontSize: 11, height: 1.5)),
+    ]);
   }
 
-  Widget archives() => ListView(padding: const EdgeInsets.fromLTRB(18, 3, 18, 25), children: [
-    const Text('ARCHIVES', style: TextStyle(color: Color(0xFFBDA0FF), fontSize: 10, letterSpacing: 2, fontWeight: FontWeight.w900)),
-    const SizedBox(height: 5), const Text('Trouver un build', style: TextStyle(fontSize: 27, fontWeight: FontWeight.w900)),
-    const SizedBox(height: 9), const Text('Choisis une archive communautaire, télécharge ton build puis importe son ZIP dans Revive.', style: TextStyle(color: muted, fontSize: 12, height: 1.5)),
-    const SizedBox(height: 18), archiveTile('FortForge', 'Catalogue communautaire de builds', Icons.public, const Color(0xFF9C7BFF)),
-    const SizedBox(height: 10), archiveTile('Carbon', 'Archive communautaire', Icons.inventory_2_outlined, const Color(0xFF42BFFF)),
-    const SizedBox(height: 10), archiveTile('Helix', 'Archive communautaire', Icons.layers_outlined, const Color(0xFFE477C8)),
-    const SizedBox(height: 20), actionTile(Icons.file_upload_outlined, 'ZIP déjà téléchargé ?', 'Importer dans la bibliothèque', importBuild),
+  Widget _section(String title, String action, VoidCallback onTap) => Row(children: [
+    Text(title, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 1.4)),
+    const Spacer(), GestureDetector(onTap: onTap, child: Text(action, style: const TextStyle(color: Color(0xFFBDA0FF), fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1))),
   ]);
 
-  Widget settings() => ListView(padding: const EdgeInsets.fromLTRB(18, 3, 18, 25), children: [
-    const Text('PARAMÈTRES', style: TextStyle(color: Color(0xFFBDA0FF), fontSize: 10, letterSpacing: 2, fontWeight: FontWeight.w900)),
-    const SizedBox(height: 5), const Text('Profil & préférences', style: TextStyle(fontSize: 25, fontWeight: FontWeight.w900)),
-    const SizedBox(height: 17),
-    Container(padding: const EdgeInsets.all(15), decoration: BoxDecoration(color: panel, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white10)), child: const Row(children: [CircleAvatar(radius: 25, backgroundColor: Color(0xFF39215B), child: Icon(Icons.person, color: Color(0xFFE0CBFF))), SizedBox(width: 12), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Compte Revive', style: TextStyle(fontWeight: FontWeight.w900)), SizedBox(height: 4), Text('Connexion Discord à intégrer', style: TextStyle(color: muted, fontSize: 10))])), Text('MODIFIER', style: TextStyle(color: Color(0xFFBDA0FF), fontSize: 9, fontWeight: FontWeight.w900))])),
-    const SizedBox(height: 12), settingRow(Icons.palette_outlined, 'Apparence', 'Thème sombre Revive'), settingRow(Icons.folder_outlined, 'Bibliothèque', 'Emplacement des builds'), settingRow(Icons.info_outline, 'À propos', 'Revive Launcher Android'),
-    const SizedBox(height: 14), const Text('La connexion Discord et le moteur de lancement Android seront ajoutés dans les prochaines étapes.', style: TextStyle(color: muted, fontSize: 11, height: 1.5)),
-  ]);
+  Widget _empty({bool compact = false}) => Container(padding: EdgeInsets.symmetric(vertical: compact ? 18 : 28, horizontal: 14), decoration: BoxDecoration(color: _panel, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white10)), child: Column(children: [
+    Icon(Icons.inventory_2_outlined, color: _muted, size: compact ? 27 : 34), const SizedBox(height: 8),
+    Text(tr('empty'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+    Text(tr('emptyHint'), style: const TextStyle(color: _muted, fontSize: 10)),
+  ]));
 
-  Widget section(String title, [String? action, VoidCallback? onTap]) => Row(children: [Text(title, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 1.4)), const Spacer(), if (action != null) GestureDetector(onTap: onTap, child: Text(action, style: const TextStyle(color: Color(0xFFBDA0FF), fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1)))]);
-  Widget emptyState({bool compact = false}) => Container(padding: EdgeInsets.symmetric(vertical: compact ? 18 : 28, horizontal: 14), decoration: BoxDecoration(color: panel, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white10)), child: Column(children: [Icon(Icons.inventory_2_outlined, color: muted, size: compact ? 27 : 34), const SizedBox(height: 8), const Text('Aucun build importé', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)), const SizedBox(height: 4), const Text('Tes archives apparaîtront ici.', style: TextStyle(color: muted, fontSize: 10))]));
-  Widget actionTile(IconData icon, String title, String subtitle, VoidCallback onTap) => InkWell(onTap: onTap, borderRadius: BorderRadius.circular(15), child: Container(padding: const EdgeInsets.all(13), decoration: BoxDecoration(color: panel, borderRadius: BorderRadius.circular(15), border: Border.all(color: Colors.white10)), child: Row(children: [Container(width: 37, height: 37, decoration: BoxDecoration(color: purple.withValues(alpha: .16), borderRadius: BorderRadius.circular(10)), child: Icon(icon, color: const Color(0xFFD1B3FF), size: 19)), const SizedBox(width: 10), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11)), const SizedBox(height: 3), Text(subtitle, style: const TextStyle(color: muted, fontSize: 9))]))])));
-  Widget archiveTile(String title, String subtitle, IconData icon, Color color) => Container(padding: const EdgeInsets.all(15), decoration: BoxDecoration(color: panel, borderRadius: BorderRadius.circular(15), border: Border.all(color: Colors.white10)), child: Row(children: [Icon(icon, color: color, size: 25), const SizedBox(width: 13), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontWeight: FontWeight.w900)), const SizedBox(height: 4), Text(subtitle, style: const TextStyle(color: muted, fontSize: 10))])), const Icon(Icons.chevron_right, color: muted)]));
-  Widget settingRow(IconData icon, String title, String sub) => Container(margin: const EdgeInsets.only(bottom: 9), padding: const EdgeInsets.all(14), decoration: BoxDecoration(color: panel, borderRadius: BorderRadius.circular(14), border: Border.all(color: Colors.white10)), child: Row(children: [Icon(icon, color: const Color(0xFFBDA0FF)), const SizedBox(width: 12), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)), const SizedBox(height: 3), Text(sub, style: const TextStyle(color: muted, fontSize: 10))])), const Icon(Icons.chevron_right, color: muted)]));
-  Widget errorCard(String e) => Container(margin: const EdgeInsets.only(top: 12), padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: const Color(0xFF3A1C29), borderRadius: BorderRadius.circular(12)), child: Text(e, style: const TextStyle(color: Color(0xFFFFB5C0), fontSize: 11)));
+  Widget _artwork(String version, double width, double height) => Container(
+    width: width, height: height,
+    decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF6126A8), Color(0xFF183B70), Color(0xFF101827)])),
+    clipBehavior: Clip.antiAlias,
+    child: Stack(fit: StackFit.expand, children: [
+      Center(child: Icon(Icons.sports_esports_outlined, size: width * .42, color: Colors.white.withValues(alpha: .22))),
+      DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Colors.black.withValues(alpha: .7)]))),
+      Positioned(left: 8, right: 5, bottom: 8, child: Text(version, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: width < 90 ? 11 : 14, fontWeight: FontWeight.w900))),
+    ]),
+  );
 
-  void showBuild(ImportedBuild b) => showModalBottomSheet<void>(context: context, backgroundColor: panel, shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(23))), builder: (ctx) => Padding(padding: const EdgeInsets.fromLTRB(20, 20, 20, 28), child: Column(mainAxisSize: MainAxisSize.min, children: [Row(children: [artwork(b.version, 100, 112), const SizedBox(width: 14), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(b.version, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900)), const SizedBox(height: 5), Text(b.name, style: const TextStyle(color: muted, fontSize: 11)), const SizedBox(height: 7), Text('${b.sizeLabel} • ${b.fileCount} fichiers', style: const TextStyle(color: Color(0xFFBDA0FF), fontSize: 10))]))]), const SizedBox(height: 17), SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: () { Navigator.pop(ctx); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Le moteur de lancement Android reste à développer.'))); }, icon: const Icon(Icons.play_arrow), label: const Text('JOUER'), style: FilledButton.styleFrom(backgroundColor: purple, padding: const EdgeInsets.symmetric(vertical: 14)))), const SizedBox(height: 7), const Text('Le bouton est présent ; le lancement du build n’est pas encore implémenté.', style: TextStyle(color: muted, fontSize: 10))])));
+  Widget _buildCard(ImportedBuild build) => Padding(padding: const EdgeInsets.only(bottom: 11), child: InkWell(onTap: () => _showBuild(build), borderRadius: BorderRadius.circular(17), child: Container(padding: const EdgeInsets.all(11), decoration: BoxDecoration(color: _panel, borderRadius: BorderRadius.circular(17), border: Border.all(color: Colors.white10)), child: Row(children: [
+    _artwork(build.version, 91, 88), const SizedBox(width: 12),
+    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(build.version, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900)),
+      const SizedBox(height: 5), Text(build.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: _muted, fontSize: 10)),
+      const SizedBox(height: 8), Text('${build.sizeLabel} • ${build.fileCount} ${tr('files')}', style: const TextStyle(color: Color(0xFFBCA0F1), fontSize: 10, fontWeight: FontWeight.w700)),
+    ])),
+    const Icon(Icons.chevron_right, color: _muted),
+  ]))));
+
+  Widget _recentCard(ImportedBuild build) => InkWell(onTap: () => _showBuild(build), child: Container(width: 220, padding: const EdgeInsets.all(9), decoration: BoxDecoration(color: _panel, borderRadius: BorderRadius.circular(15), border: Border.all(color: Colors.white10)), child: Row(children: [
+    _artwork(build.version, 77, 105), const SizedBox(width: 10),
+    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
+      Text(build.version, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900)),
+      const SizedBox(height: 5), Text(build.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: _muted)),
+    ])),
+  ])));
+
+  Widget _errorCard(String error) => Container(margin: const EdgeInsets.only(top: 12), padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: const Color(0xFF3A1C29), borderRadius: BorderRadius.circular(12)), child: Text(error, style: const TextStyle(color: Color(0xFFFFB5C0), fontSize: 11)));
+
+  Future<void> _removeBuild(ImportedBuild build) async {
+    await _archive.deleteBuild(build);
+    if (!mounted) return;
+    setState(() => _builds.remove(build));
+    await _saveBuilds();
+    if (mounted) Navigator.pop(context);
+  }
+
+  void _showBuild(ImportedBuild build) => showModalBottomSheet<void>(
+    context: context, backgroundColor: _panel, isScrollControlled: true,
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(23))),
+    builder: (sheetContext) => Padding(padding: const EdgeInsets.fromLTRB(20, 20, 20, 28), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [_artwork(build.version, 100, 112), const SizedBox(width: 14), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(build.version, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+        const SizedBox(height: 5), Text(build.name, style: const TextStyle(color: _muted, fontSize: 11)),
+        const SizedBox(height: 7), Text('${build.sizeLabel} • ${build.fileCount} ${tr('files')}', style: const TextStyle(color: Color(0xFFBDA0FF), fontSize: 10)),
+      ]))]),
+      const SizedBox(height: 12),
+      if (build.hasEngine) Text('✓ ${tr('engine')}', style: const TextStyle(color: Colors.greenAccent, fontSize: 11)),
+      if (build.hasFortniteGame) Text('✓ ${tr('game')}', style: const TextStyle(color: Colors.greenAccent, fontSize: 11)),
+      const SizedBox(height: 15),
+      SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: () { Navigator.pop(sheetContext); _message(tr('playHint')); }, icon: const Icon(Icons.play_arrow), label: Text(tr('play')), style: FilledButton.styleFrom(backgroundColor: _purple, padding: const EdgeInsets.symmetric(vertical: 14)))),
+      Align(alignment: Alignment.centerRight, child: TextButton.icon(onPressed: () => _removeBuild(build), icon: const Icon(Icons.delete_outline), label: Text(tr('delete')))),
+    ])),
+  );
 }
