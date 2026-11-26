@@ -1,35 +1,15 @@
 import 'dart:io';
-
 import 'package:archive/archive.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
-
-class ImportedBuild {
-  const ImportedBuild({
-    required this.name,
-    required this.version,
-    required this.directory,
-    required this.fileCount,
-    required this.totalBytes,
-    required this.hasEngine,
-    required this.hasFortniteGame,
-  });
-
-  final String name;
-  final String version;
-  final String directory;
-  final int fileCount;
-  final int totalBytes;
-  final bool hasEngine;
-  final bool hasFortniteGame;
-
-  String get sizeLabel => totalBytes >= 1024 * 1024 * 1024
-      ? '${(totalBytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} Go'
-      : '${(totalBytes / (1024 * 1024)).toStringAsFixed(0)} Mo';
-}
+import '../models/imported_build.dart';
 
 class BuildArchiveService {
+  static const maxArchiveBytes = 400 * 1024 * 1024;
+  static const maxExtractedBytes = 2 * 1024 * 1024 * 1024;
+  static const maxEntries = 100000;
+
   Future<ImportedBuild?> pickAndImportZip() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -38,62 +18,83 @@ class BuildArchiveService {
     );
     if (result == null || result.files.isEmpty) return null;
     final picked = result.files.single;
+    if (picked.size > maxArchiveBytes) {
+      throw Exception('Archive trop volumineuse pour cet import : limite actuelle de 400 Mo.');
+    }
     final bytes = picked.bytes;
-    if (bytes == null) throw Exception('Impossible de lire cette archive ZIP.');
+    if (bytes == null) throw Exception('Android n’a pas pu lire le fichier ZIP sélectionné.');
 
     final archive = ZipDecoder().decodeBytes(bytes, verify: true);
-    final docs = await getApplicationDocumentsDirectory();
+    if (archive.length > maxEntries) {
+      throw Exception('Archive refusée : elle contient trop de fichiers.');
+    }
+
+    final root = await getApplicationDocumentsDirectory();
     final safeName = p.basenameWithoutExtension(picked.name)
         .replaceAll(RegExp(r'[^A-Za-z0-9._ -]'), '_').trim();
-    final folderName = safeName.isEmpty
-        ? 'Build-${DateTime.now().millisecondsSinceEpoch}'
-        : safeName;
-    final target = Directory(p.join(docs.path, 'Revive', 'Builds', folderName));
-    await target.create(recursive: true);
+    final folder = safeName.isEmpty ? 'Build-${DateTime.now().millisecondsSinceEpoch}' : safeName;
+    final target = Directory(p.join(root.path, 'Revive', 'Builds', folder));
+    if (await target.exists()) {
+      throw Exception('Ce build existe déjà. Renomme le ZIP avant de le réimporter.');
+    }
 
     var count = 0;
-    var totalBytes = 0;
+    var total = 0;
     var hasEngine = false;
-    var hasFortniteGame = false;
-    final versionSources = <String>[picked.name];
+    var hasGame = false;
+    final versionSource = <String>[picked.name];
+    await target.create(recursive: true);
+    try {
+      for (final entry in archive) {
+        if (!entry.isFile) continue;
+        final normalized = entry.name.replaceAll('\\\\', '/');
+        final parts = normalized.split('/');
+        if (normalized.startsWith('/') ||
+            RegExp(r'^[A-Za-z]:').hasMatch(normalized) ||
+            parts.any((part) => part == '..' || part.isEmpty)) {
+          throw Exception('Archive refusée : chemin de fichier non sécurisé.');
+        }
+        final lower = parts.map((part) => part.toLowerCase()).toList();
+        if (lower.contains('engine')) hasEngine = true;
+        if (lower.contains('fortnitegame')) hasGame = true;
+        if (versionSource.length < 100) versionSource.add(normalized);
 
-    for (final entry in archive) {
-      if (!entry.isFile) continue;
-      final normalized = entry.name.replaceAll('\\', '/');
-      final segments = normalized.split('/');
-      if (normalized.startsWith('/') ||
-          RegExp(r'^[A-Za-z]:').hasMatch(normalized) ||
-          segments.any((part) => part == '..' || part.isEmpty)) {
-        throw Exception('Archive refusée : chemin de fichier non autorisé.');
+        final content = entry.content as List<int>;
+        total += content.length;
+        if (total > maxExtractedBytes) {
+          throw Exception('Archive refusée : contenu extrait supérieur à 2 Go.');
+        }
+        final output = File(p.joinAll([target.path, ...parts]));
+        await output.parent.create(recursive: true);
+        await output.writeAsBytes(content, flush: false);
+        count++;
       }
-      final lower = segments.map((part) => part.toLowerCase()).toList();
-      if (lower.contains('engine')) hasEngine = true;
-      if (lower.contains('fortnitegame')) hasFortniteGame = true;
-      if (versionSources.length < 80) versionSources.add(normalized);
-
-      final outFile = File(p.join(target.path, ...segments));
-      await outFile.parent.create(recursive: true);
-      final raw = entry.content;
-      final data = raw is List<int> ? raw : (raw as dynamic).toList().cast<int>();
-      await outFile.writeAsBytes(data, flush: false);
-      count++;
-      totalBytes += data.length;
+      if (count == 0) throw Exception('Le ZIP ne contient aucun fichier.');
+      final match = RegExp(
+        r'(?:^|[^0-9])(?:v|build[ _-]?)?(\d{1,2}\.\d{1,2}(?:\.\d{1,2})?)(?:[^0-9]|$)',
+        caseSensitive: false,
+      ).firstMatch(versionSource.join(' '));
+      final version = match?.group(1) ?? 'Version à identifier';
+      return ImportedBuild(
+        id: DateTime.now().microsecondsSinceEpoch.toString(),
+        name: folder,
+        version: version,
+        description: 'Build Fortnite Android importé dans Revive Launcher.',
+        trailerUrl: '',
+        directory: target.path,
+        fileCount: count,
+        totalBytes: total,
+        hasEngine: hasEngine,
+        hasFortniteGame: hasGame,
+      );
+    } catch (_) {
+      if (await target.exists()) await target.delete(recursive: true);
+      rethrow;
     }
-    if (count == 0) throw Exception('Cette archive ne contient aucun fichier exploitable.');
+  }
 
-    final versionMatch = RegExp(
-      r'(?:^|[^0-9])(?:v|build[ _-]?)?(\d{1,2}\.\d{1,2}(?:\.\d{1,2})?)(?:[^0-9]|$)',
-      caseSensitive: false,
-    ).firstMatch(versionSources.join(' '));
-
-    return ImportedBuild(
-      name: folderName,
-      version: versionMatch?.group(1) ?? 'Version à identifier',
-      directory: target.path,
-      fileCount: count,
-      totalBytes: totalBytes,
-      hasEngine: hasEngine,
-      hasFortniteGame: hasFortniteGame,
-    );
+  Future<void> deleteBuild(ImportedBuild build) async {
+    final directory = Directory(build.directory);
+    if (await directory.exists()) await directory.delete(recursive: true);
   }
 }
