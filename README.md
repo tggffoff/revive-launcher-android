@@ -1,27 +1,60 @@
-# Revive Launcher — Android prototype
+# REVIVE Launcher — Android
 
-This is an Android-oriented Flutter prototype using the supplied Revive logo and a dark desktop-launcher-inspired visual direction (ATLAS-style layout conventions, adapted for mobile).
+Application Flutter : version Android du launcher REVIVE.
 
-## Included in this iteration
+> Basé sur [ATLAS Link](third_party/ATLAS-Link-LICENSE.txt) de cipherfps et ses
+> contributeurs. REVIVE n'est ni affilié à Epic Games ni approuvé par lui.
 
-- Revive branding and supplied logo.
-- Home, Builds, Archives and Settings navigation.
-- Dark hero panel, library cards, build details sheet and profile placeholder.
-- ZIP picker and extraction into app-private storage.
-- Basic archive inspection for `Engine/` and `FortniteGame/` folders, plus a best-effort version guess from the archive name/path.
-- Season artwork lookup using the existing `assets/seasons/SeasonN.jpg` images in the source repository (loaded from the public repository URL for this prototype).
-- GitHub Actions workflow to build an Android APK.
+## Fonctions
 
-## Not implemented yet
+- Connexion Discord (Supabase OAuth PKCE) dans le navigateur, retour par
+  `revive://auth/callback`, session chiffrée et restaurée au démarrage.
+- Profil : avatar, nom Discord, pseudo modifiable (`user_metadata.pseudo`, comme
+  sur Windows), déconnexion.
+- Accueil, bibliothèque (bouton +), catalogue, paramètres.
+- Import de builds ZIP : extraction en flux (ZIP et ZIP64), progression,
+  annulation, vérification CRC, refus des archives dangereuses, des doublons et
+  des archives sans build reconnu.
+- Version reconnue à l'import : `++Fortnite+Release-X.Y` lu dans les fichiers du
+  build (ou dans un APK présent dans le ZIP), sinon nom du ZIP et des dossiers ;
+  le visuel de la saison (1 à 41) s'affiche automatiquement.
+- Catalogue Android lu depuis l'API publique FortForge, avec copie hors ligne ;
+  liens FortForge, Carbon et Helix.
+- Français, anglais, espagnol (langue du téléphone, anglais par défaut).
+- Le bouton LANCER reste provisoire : le lancement n'est pas implémenté.
 
-- Offline bundling of the season artwork (the prototype currently loads it from the public source repository).
-- Persistent build database and large-archive streaming extraction.
-- Discord/Supabase mobile OAuth callback integration.
-- Android-compatible Fortnite runtime/launch mechanism.
-- Actual build launch action (the current JOUER button is explicitly a placeholder).
+## Réglage Supabase (obligatoire pour la connexion)
 
-The ZIP is treated as a game build archive, not as an APK/OBB installer. This prototype extracts its contents and inspects the folder structure. The current picker reads the ZIP into memory, so it is only suitable for small test archives; production support for very large Fortnite archives must use streaming extraction and progress/cancellation before it is used with multi-gigabyte files.
+Dans le tableau de bord Supabase : **Authentication > URL Configuration >
+Redirect URLs**, ajouter `revive://auth/callback`. Le fournisseur Discord doit
+être activé dans **Authentication > Providers**.
 
-## Build
+L'URL et la clé publique du projet sont dans `lib/config.dart`. Aucun secret
+GitHub n'est nécessaire. Ne jamais y mettre de clé `service_role` ni le secret
+client Discord.
 
-Push this directory to a GitHub repository. The workflow in `.github/workflows/android.yml` uses GitHub Actions to build and upload the release APK. No APK has been compiled in this workspace.
+## Compilation
+
+GitHub > onglet **Actions** > **Android APK** > **Run workflow**. L'APK se
+télécharge dans la section **Artifacts** de l'exécution terminée.
+
+En local (Flutter 3.41) :
+
+```
+flutter create --platforms=android --org com.revive --project-name revive_launcher .
+python3 tool/configure_android.py
+flutter pub get
+flutter analyze --no-fatal-infos
+flutter test
+flutter build apk --release
+```
+
+## Limites connues
+
+- L'APK est signé avec la clé de debug générée à chaque compilation : pour
+  installer une nouvelle version, il faut d'abord désinstaller l'ancienne, ce
+  qui efface les builds importés. Une clé de signature fixe est à ajouter.
+- Pendant un import, le téléphone copie d'abord le ZIP puis l'extrait : prévoir
+  de l'espace libre pour le ZIP deux fois et les fichiers extraits. Garder
+  l'application ouverte.
+- Le « Discord Gate » de Windows (réseau Tailscale) n'est pas porté.
